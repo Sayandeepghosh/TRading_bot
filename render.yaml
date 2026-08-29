@@ -29,6 +29,23 @@ services:
         value: 0.0.0.0
       - key: PYTHONUNBUFFERED
         value: "1"
+
+      # Free instances get 512 MB RAM. Measured peak usage of a cold scan:
+      #   NIFTY50   224 MB   comfortable
+      #   NIFTY100  305 MB   fits, but ~60% of budget before web overhead
+      #   NIFTY200+          will be OOM-killed
+      # NIFTY50 by default so the free tier is reliable. Change it in the Render
+      # dashboard (Environment tab) if you move to a paid instance.
+      - key: ANALYSER_UNIVERSE
+        value: NIFTY50
+
+      # Set your real capital in the Render dashboard rather than here, so a
+      # personal number never lands in git.
+      # - key: ANALYSER_CAPITAL
+      #   value: "100000"
+      # - key: ANALYSER_RISK_PCT
+      #   value: "1.0"
+
       # Render injects PORT itself and run.py reads it.
       # Do not set PORT here: a hardcoded value that disagrees with the one
       # Render assigns makes the health check hit a closed socket.

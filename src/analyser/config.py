@@ -133,13 +133,62 @@ class AppConfig(BaseModel):
 
 
 def load_config(path: Path | str | None = None) -> AppConfig:
-    """Load and validate config from YAML. Falls back to defaults if absent."""
+    """Load and validate config from YAML, then apply environment overrides.
+
+    Environment wins over the file because hosted platforms configure through
+    env vars, and because it lets you run a smaller universe on a memory-limited
+    free instance without committing a different config to the repo.
+
+    Supported:
+      ANALYSER_UNIVERSE    NIFTY50 | NIFTY100 | NIFTY200 | NIFTY500
+      ANALYSER_CAPITAL     rupees, e.g. 250000
+      ANALYSER_RISK_PCT    percent of capital risked per trade, e.g. 0.75
+      ANALYSER_MAX_POS_PCT max percent of capital in one position
+      ANALYSER_FUND_TOP_N  how many leaders get fundamentals fetched
+    """
     cfg_path = Path(path) if path else DEFAULT_CONFIG_PATH
-    if not cfg_path.exists():
-        return AppConfig()
-    with cfg_path.open("r", encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
+    if cfg_path.exists():
+        with cfg_path.open("r", encoding="utf-8") as fh:
+            raw = yaml.safe_load(fh) or {}
+    else:
+        raw = {}
+
+    _apply_env(raw)
     return AppConfig.model_validate(raw)
+
+
+def _apply_env(raw: dict) -> None:
+    """Overlay ANALYSER_* environment variables onto the raw config dict.
+
+    Invalid values are ignored rather than raising: a typo in a platform's
+    dashboard should not stop the app booting, and pydantic still validates
+    whatever does get through.
+    """
+    import os
+
+    def section(name: str) -> dict:
+        node = raw.get(name)
+        if not isinstance(node, dict):
+            node = {}
+            raw[name] = node
+        return node
+
+    if (v := os.environ.get("ANALYSER_UNIVERSE")):
+        section("universe")["index"] = v.strip().upper().replace(" ", "")
+
+    for env_key, sec, field, cast in (
+        ("ANALYSER_CAPITAL", "risk", "capital", float),
+        ("ANALYSER_RISK_PCT", "risk", "risk_per_trade_pct", float),
+        ("ANALYSER_MAX_POS_PCT", "risk", "max_position_pct", float),
+        ("ANALYSER_FUND_TOP_N", "data", "fundamentals_top_n", int),
+    ):
+        val = os.environ.get(env_key)
+        if not val:
+            continue
+        try:
+            section(sec)[field] = cast(val)
+        except (TypeError, ValueError):
+            pass
 
 
 # ---------------------------------------------------------------------------
