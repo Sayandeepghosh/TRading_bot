@@ -1,0 +1,14 @@
+.venv/
+.cache/
+docs/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.git/
+.github/
+.gitignore
+Dockerfile
+.dockerignore
+deploy/
+# Your positions are personal; never bake them into an image.
+config/holdings.json

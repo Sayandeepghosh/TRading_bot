@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block title %}{{ idea.symbol }} &middot; Equity Analyser{% endblock %}
+{% block bodyattrs %}data-symbol="{{ idea.symbol }}"{% endblock %}
+
+{% block content %}
+
+<section class="detail-head">
+  <div>
+    <h1>{{ idea.symbol }}</h1>
+    <p class="sub-co">{{ idea.company }} &middot; {{ idea.sector }}</p>
+  </div>
+  <div class="detail-px">
+    {% if static_mode %}
+      <span class="lbl">Last close &middot; {{ idea.as_of }}</span>
+      <div class="p">Rs{{ idea.last_price|inr }}</div>
+    {% else %}
+      <span class="lbl">Live price <span id="session-label" class="dim"></span></span>
+      <div class="live-quote">
+        <span class="lq-price" data-live-price="{{ idea.symbol }}">Rs{{ idea.last_price|inr }}</span>
+        <span class="lq-change" data-live-change="{{ idea.symbol }}"></span>
+      </div>
+      <div class="live-ohl" data-live-ohl="{{ idea.symbol }}"></div>
+    {% endif %}
+  </div>
+</section>
+
+<div class="badges" style="margin-bottom:1rem">
+  <span class="badge badge-setup">{{ idea.setup }}</span>
+  <span class="badge badge-{{ idea.confidence|lower }}">{{ idea.confidence }} confidence</span>
+  <span class="badge badge-score">Score {{ idea.composite_score }}</span>
+  {% if idea.horizon_label != 'n/a' %}<span class="badge">Hold {{ idea.horizon_label }}</span>{% endif %}
+</div>
+
+{% if idea.action %}
+  {% set a = idea.action %}
+  <div class="state-bar st-{{ a.entry_state|lower|replace(' ', '-')|replace(',', '') }}">
+    <span>{{ a.entry_state }}</span>
+    {% if a.entry_trigger %}
+      <span class="meta">Trigger Rs{{ a.entry_trigger|inr }}</span>
+    {% endif %}
+    <span class="meta">Risk Rs{{ a.risk_per_share|inr }}/share &middot; {{ a.reward_risk }}:1 payoff</span>
+  </div>
+
+  <div class="plan">
+    <div class="plan-cell plan-buy">
+      <h4>1 &middot; When to invest</h4>
+      <div class="plan-val">{{ a.entry_zone_low|inr }} &ndash; {{ a.entry_zone_high|inr }}</div>
+      <p class="plan-note">{{ a.entry_condition }}</p>
+    </div>
+    <div class="plan-cell plan-stop">
+      <h4>2 &middot; When to stop out</h4>
+      <div class="plan-val">{{ a.stop|inr }}</div>
+      <p class="plan-note">
+        Placed {{ a.stop_basis }}. Risk <strong>Rs{{ a.risk_per_share|inr }}</strong> per share.
+      </p>
+    </div>
+    <div class="plan-cell plan-target">
+      <h4>3 &middot; Where to take profit</h4>
+      <div class="plan-val">{{ a.target_2r|inr }}</div>
+      <div class="ladder">
+        <span>+1R {{ a.target_1r|inr }}</span>
+        <span>+2R {{ a.target_2r|inr }}</span>
+        <span>+3R {{ a.target_3r|inr }}</span>
+      </div>
+      <p class="plan-note">
+        Room to Rs{{ a.structural_target|inr }} using {{ a.target_basis }}.
+      </p>
+    </div>
+    {% if idea.plan %}
+      <div class="plan-cell plan-size">
+        <h4>4 &middot; How much</h4>
+        <div class="plan-val">{{ idea.plan.quantity }} sh</div>
+        <p class="plan-note">
+          Rs{{ idea.plan.capital_deployed|inr }} ({{ idea.plan.pct_of_capital }}% of capital).
+          Max loss <strong class="red">Rs{{ idea.plan.max_loss_at_stop|inr }}</strong>.
+          {{ idea.plan.sizing_note }}
+        </p>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="exits">
+    <h4>Exit rules</h4>
+    <dl>
+      <dt>Scale out</dt><dd>{{ a.trail_rule }}</dd>
+      <dt>Trend break</dt><dd>{{ a.signal_exit_rule }}</dd>
+      <dt>Time stop</dt><dd>No +1R within about {{ a.time_stop_days }} days means the setup failed. Close it.</dd>
+      <dt>Invalidation</dt><dd>{{ a.entry_invalidation }}</dd>
+    </dl>
+  </div>
+
+  {% if not static_mode %}
+  <div class="card" style="padding:.9rem 1.1rem">
+    <h4>Log this trade</h4>
+    <p class="hint" style="margin:.4rem 0 .7rem">
+      Buy it in your broker app first, then record it here so the positions page
+      can tell you when to tighten the stop or get out.
+    </p>
+    <form method="post" action="{{ action('holdings/add') }}" class="form-grid">
+      <input type="hidden" name="symbol" value="{{ idea.symbol }}">
+      <div class="field">
+        <label>Quantity</label>
+        <input name="quantity" type="number" min="1" value="{{ idea.plan.quantity if idea.plan and idea.plan.quantity else 1 }}" required>
+      </div>
+      <div class="field">
+        <label>Buy price</label>
+        <input name="entry_price" type="number" step="0.01" min="0.01" value="{{ a.entry_zone_high }}" required>
+      </div>
+      <div class="field">
+        <label>Buy date</label>
+        <input name="entry_date" type="date" value="{{ idea.as_of }}" required>
+      </div>
+      <div class="field">
+        <label>Stop</label>
+        <input name="stop_price" type="number" step="0.01" value="{{ a.stop }}">
+      </div>
+      <div class="field">
+        <label>Target</label>
+        <input name="target_price" type="number" step="0.01" value="{{ a.target_2r }}">
+      </div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <button class="btn" type="submit">Add to positions</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+{% else %}
+  <div class="alert alert-red">
+    <div class="alert-body">
+      <h3>No valid long entry</h3>
+      <p class="dim">{{ explanation }}</p>
+    </div>
+  </div>
+{% endif %}
+
+{% if not static_mode %}
+<section class="chart-panel">
+  <div class="chart-toolbar">
+    <span class="grp-label">Today's session</span>
+    <span class="cap" id="intraday-stamp">loading one-minute bars &hellip;</span>
+  </div>
+  <div id="chart-intraday" class="chart"></div>
+  <p class="chart-hint">
+    One-minute bars for the current session, refreshed automatically while the
+    market is open. Your buy zone, stop and targets are drawn on, so you can see
+    where price sits relative to each decision without doing arithmetic.
+  </p>
+</section>
+{% endif %}
+
+{% if chart %}
+<section class="chart-panel">
+  <div class="chart-toolbar">
+    <span class="grp-label">Overlays</span>
+    <button type="button" class="chip chip-ma"   data-toggle-chart="chart-stock" data-series="ma">Moving averages</button>
+    <button type="button" class="chip chip-bb"   data-toggle-chart="chart-stock" data-series="bb">Bollinger</button>
+    <button type="button" class="chip chip-vol"  data-toggle-chart="chart-stock" data-series="vol">Volume</button>
+    <button type="button" class="chip chip-macd" data-toggle-chart="chart-stock" data-series="macd">MACD</button>
+    <button type="button" class="chip chip-rsi"  data-toggle-chart="chart-stock" data-series="rsi">RSI</button>
+  </div>
+  <div id="chart-stock" class="chart"></div>
+  <p class="chart-hint">
+    Use the range buttons above the chart for 1M to All. Drag to pan, scroll to
+    zoom, double-click to reset. The blue band is the buy zone, the red line is
+    your stop, and the dotted green lines are the R targets.
+  </p>
+</section>
+<script id="chart-data" type="application/json">{{ chart|tojson }}</script>
+{% if idea.action %}
+<script id="level-data" type="application/json">{{
+  {'entry_low': idea.action.entry_zone_low,
+   'entry_high': idea.action.entry_zone_high,
+   'stop': idea.action.stop,
+   'target_1r': idea.action.target_1r,
+   'target_2r': idea.action.target_2r,
+   'target_3r': idea.action.target_3r}|tojson
+}}</script>
+{% endif %}
+{% endif %}
+
+{% if idea.base_rate %}
+  {% set b = idea.base_rate %}
+  <div class="baserate {% if not b.reliable %}baserate-thin{% endif %}">
+    <strong>Historical base rate for this setup on {{ idea.symbol }}:</strong>
+    reached +1R before its stop <strong>{{ b.win_rate_pct }}%</strong> of the time
+    across {{ b.samples }} occurrences, horizon {{ b.horizon_days }} days,
+    average outcome {{ b.avg_return_pct|signed }}%. {{ b.note }}
+    {% if not b.reliable %}<span class="flag">Treat as anecdote, not evidence.</span>{% endif %}
+  </div>
+{% endif %}
+
+<div class="cols2">
+  <div>
+    <h3>Factor scores</h3>
+    <div class="factors">
+      {% for name, val in idea.factors.as_dict().items() %}
+        <div class="fbar">
+          <span class="fbar-name">{{ name }}{% if name == 'fundamental' and not idea.factors.fundamental_available %} *{% endif %}</span>
+          <span class="fbar-track"><span class="fbar-fill" style="width:{{ val }}%"></span></span>
+          <span class="fbar-val">{{ val }}</span>
+        </div>
+      {% endfor %}
+    </div>
+    {% if not idea.factors.fundamental_available %}
+      <p class="hint">* fundamentals unavailable; weight redistributed to technical factors.</p>
+    {% endif %}
+
+    <h3>Why this confidence</h3>
+    <ul class="reasons">{% for r in idea.confidence_reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+    <p class="rationale">{{ explanation }}</p>
+
+    {% if idea.fundamentals %}
+      {% set f = idea.fundamentals %}
+      <h3>Fundamentals</h3>
+      <table class="kv">
+        <tbody>
+          {% if f.market_cap %}<tr><td>Market cap</td><td>Rs{{ f.market_cap|compact }}</td></tr>{% endif %}
+          {% if f.trailing_pe %}<tr><td>Trailing P/E</td><td>{{ f.trailing_pe|round(2) }}</td></tr>{% endif %}
+          {% if f.forward_pe %}<tr><td>Forward P/E</td><td>{{ f.forward_pe|round(2) }}</td></tr>{% endif %}
+          {% if f.price_to_book %}<tr><td>Price / book</td><td>{{ f.price_to_book|round(2) }}</td></tr>{% endif %}
+          {% if f.roe is not none %}<tr><td>Return on equity</td><td>{{ f.roe|round(1) }}%</td></tr>{% endif %}
+          {% if f.debt_to_equity is not none %}<tr><td>Debt / equity</td><td>{{ f.debt_to_equity|round(1) }}%</td></tr>{% endif %}
+          {% if f.revenue_growth is not none %}<tr><td>Revenue growth</td><td>{{ f.revenue_growth|round(1) }}%</td></tr>{% endif %}
+          {% if f.earnings_growth is not none %}<tr><td>Earnings growth</td><td>{{ f.earnings_growth|round(1) }}%</td></tr>{% endif %}
+          {% if f.profit_margin is not none %}<tr><td>Profit margin</td><td>{{ f.profit_margin|round(1) }}%</td></tr>{% endif %}
+        </tbody>
+      </table>
+    {% endif %}
+  </div>
+
+  <div>
+    <h3>Signals ({{ idea.signals|length }})</h3>
+    <ul class="signals">
+      {% for s in idea.signals %}
+        <li class="sig-{{ s.direction }}"><strong>{{ s.label }}</strong>{{ s.detail }}</li>
+      {% endfor %}
+    </ul>
+
+    <details style="margin-top:1rem">
+      <summary>Raw indicator values</summary>
+      <div class="reveal">
+        <table class="kv kv-sm">
+          <tbody>
+            {% for k, v in idea.indicators.items() %}
+              <tr><td>{{ k|replace('_', ' ') }}</td><td>{{ v }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </div>
+</div>
+
+<p style="margin-top:1.6rem"><a class="btn btn-ghost" href="{{ page('') }}">&larr; Back to opportunities</a></p>
+{% endblock %}

@@ -1,0 +1,447 @@
+{% extends "base.html" %}
+{% block title %}Opportunities &middot; Equity Analyser{% endblock %}
+
+{% block content %}
+
+{# ====================================================== no data yet ======= #}
+{% if not result %}
+
+  {% if progress.error %}
+    <div class="alert alert-red">
+      <div class="alert-body">
+        <h3>Scan failed</h3>
+        <p class="red mono">{{ progress.error }}</p>
+        <p class="dim">
+          Usually a network issue or a data provider rejecting requests. Waiting a
+          minute and retrying is normally enough.
+        </p>
+      </div>
+      <div class="alert-actions">
+        <form method="post" action="{{ action('refresh') }}"><button class="btn" type="submit">Try again</button></form>
+      </div>
+    </div>
+  {% else %}
+    <div class="scanning" id="scan-progress">
+      <h2><span class="spin"></span> Analysing {{ cfg.universe.index }}</h2>
+      <p>
+        Downloading price history, computing indicators, and building entry and
+        exit plans. This takes 15 to 60 seconds the first time; after that the
+        cache makes it much faster.
+      </p>
+      <div class="bar"><div class="bar-fill" style="width:{{ progress.pct or 2 }}%"></div></div>
+      <div class="bar-meta">
+        <span data-stage>{{ progress.stage }}</span>
+        <span data-count></span>
+        <span data-elapsed>{{ progress.elapsed_s }}s</span>
+      </div>
+    </div>
+  {% endif %}
+
+{% else %}
+
+{# ====================================================== market regime ===== #}
+{% set c = result.context %}
+<section class="regime regime-{{ c.regime|lower }}">
+  <div class="regime-label">
+    <span class="lbl">Market regime</span>
+    <h2>{{ c.regime }}</h2>
+  </div>
+
+  <div>
+    <span class="lbl">Nifty 50</span>
+    <div class="regime-index">
+      <span class="lvl">{{ c.nifty_last|inr }}</span>
+      <span class="{% if c.nifty_change_pct >= 0 %}green{% else %}red{% endif %}">
+        {{ c.nifty_change_pct|signed }}%
+      </span>
+    </div>
+  </div>
+
+  <div class="regime-facts">
+    <span><span class="lbl">From 52w high</span>{{ c.pct_from_52w_high|signed }}%</span>
+    <span><span class="lbl">50 DMA</span>{% if c.above_sma50 %}<span class="green">above</span>{% else %}<span class="red">below</span>{% endif %}</span>
+    <span><span class="lbl">200 DMA</span>{% if c.above_sma200 %}<span class="green">above</span>{% else %}<span class="red">below</span>{% endif %}</span>
+    <span><span class="lbl">Market</span>{{ c.market_status }}</span>
+    {% if c.advance_decline != 'n/a' %}<span><span class="lbl">Breadth</span>{{ c.advance_decline }}</span>{% endif %}
+  </div>
+
+  <p class="regime-note">{{ c.note }}</p>
+</section>
+
+{# ====================================================== stat tiles ======== #}
+<section class="stats">
+  <div class="stat {% if stats.buy_now %}accent-green{% endif %}">
+    <span class="lbl">Ready to buy</span>
+    <div class="stat-val">{{ stats.buy_now }}</div>
+    <div class="stat-sub">entry condition already met</div>
+  </div>
+  <div class="stat accent-amber">
+    <span class="lbl">Waiting</span>
+    <div class="stat-val">{{ stats.waiting }}</div>
+    <div class="stat-sub">need a trigger price</div>
+  </div>
+  <div class="stat accent-blue">
+    <span class="lbl">Avg reward:risk</span>
+    <div class="stat-val">{{ stats.avg_rr }}</div>
+    <div class="stat-sub">across ready ideas</div>
+  </div>
+  <div class="stat">
+    <span class="lbl">High confidence</span>
+    <div class="stat-val">{{ stats.high_conf }}</div>
+    <div class="stat-sub">of {{ stats.buy_now }} ready</div>
+  </div>
+  <div class="stat accent-red">
+    <span class="lbl">Total risk if all taken</span>
+    <div class="stat-val">{{ (stats.total_risk / 1000)|round(1) }}k</div>
+    <div class="stat-sub">Rs{{ stats.total_risk|inr }} at stops</div>
+  </div>
+  <div class="stat">
+    <span class="lbl">Scanned</span>
+    <div class="stat-val">{{ stats.scanned }}</div>
+    <div class="stat-sub">{{ stats.screened_out }} screened out</div>
+  </div>
+</section>
+
+{% if result.errors %}
+  <details class="alert alert-amber">
+    <summary>{{ result.errors|length }} data warning{{ 's' if result.errors|length != 1 }}</summary>
+    <ul class="dim reveal">{% for e in result.errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </details>
+{% endif %}
+
+{# ====================================================== overview charts === #}
+{% if overview %}
+<section class="chart-grid">
+  {% if overview.regime %}
+  <div class="chart-card span2">
+    <header>
+      <h3>Nifty 50 and its moving averages</h3>
+      <span class="cap">Drag to pan, scroll to zoom. Price below the 200 DMA is the regime warning.</span>
+    </header>
+    <div id="chart-regime" class="chart"></div>
+  </div>
+  {% endif %}
+
+  {% if overview.scatter %}
+  <div class="chart-card span2">
+    <header>
+      <h3>Score against reward:risk</h3>
+      <span class="cap">Top right is the sweet spot. Click any point to open it.</span>
+    </header>
+    <div id="chart-scatter" class="chart"></div>
+  </div>
+  {% endif %}
+
+  {% if overview.setups %}
+  <div class="chart-card">
+    <header>
+      <h3>What kind of market is this</h3>
+      <span class="cap">Setup mix across {{ result.scanned }} stocks</span>
+    </header>
+    <div id="chart-setups" class="chart"></div>
+  </div>
+  {% endif %}
+
+  {% if overview.sectors %}
+  <div class="chart-card">
+    <header>
+      <h3>Where the setups are</h3>
+      <span class="cap">Sectors with tradeable setups</span>
+    </header>
+    <div id="chart-sectors" class="chart"></div>
+  </div>
+  {% endif %}
+</section>
+<script id="overview-data" type="application/json">{{ overview|tojson }}</script>
+{% endif %}
+
+{# ====================================================== buy now =========== #}
+<div class="sec-head">
+  <h2>Ready to buy</h2>
+  <span class="pill">{{ buy_now|length }}</span>
+  <div class="sec-tools">
+    <a class="btn btn-ghost btn-sm" href="{{ u('export.csv') }}"
+       {% if static_mode %}download{% endif %}>Export CSV</a>
+  </div>
+</div>
+<p class="sec-sub">
+  The entry condition is satisfied at current prices, so these are actionable
+  today. Read the stop before the target: it tells you what the idea costs when
+  it is wrong, which is the only number you control.
+</p>
+
+{% if not buy_now %}
+  <div class="empty">
+    <strong>Nothing qualifies right now</strong>
+    <p>
+      That is a real answer, not a failure. In a
+      {{ result.context.regime|lower }} regime, forcing a trade because the
+      screen is empty is how accounts bleed. Check the waiting list below and
+      set alerts instead.
+    </p>
+  </div>
+{% endif %}
+
+{% for i in buy_now %}
+  {% set a = i.action %}
+  <article class="idea idea-ready">
+    <div class="idea-head">
+      <div>
+        <div class="idea-title">
+          {% if has_stock_page(i.symbol) %}<a class="idea-sym" href="{{ stock_url(i.symbol) }}">{{ i.symbol }}</a>{% else %}<span class="idea-sym">{{ i.symbol }}</span>{% endif %}
+          <span class="idea-co">{{ i.company }}</span>
+        </div>
+        <div class="badges" style="margin-top:.4rem">
+          <span class="badge badge-setup">{{ i.setup }}</span>
+          <span class="badge badge-{{ i.confidence|lower }}">{{ i.confidence }} confidence</span>
+          <span class="badge badge-score">Score {{ i.composite_score }}</span>
+          <span class="badge">Hold {{ i.horizon_label }}</span>
+          <span class="badge badge-sector">{{ i.sector }}</span>
+        </div>
+      </div>
+      <div class="idea-price">
+        {% if static_mode %}
+          <span class="lbl">Last close</span>
+          <div class="p">Rs{{ i.last_price|inr }}</div>
+        {% else %}
+          <span class="lbl">Live</span>
+          <div class="p" data-live-price="{{ i.symbol }}">Rs{{ i.last_price|inr }}</div>
+          <span class="sub" data-live-change="{{ i.symbol }}"></span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="plan">
+      <div class="plan-cell plan-buy">
+        <h4>1 &middot; When to invest</h4>
+        <div class="plan-val">{{ a.entry_zone_low|inr }} &ndash; {{ a.entry_zone_high|inr }}</div>
+        <p class="plan-note">{{ a.entry_condition }}</p>
+      </div>
+
+      <div class="plan-cell plan-stop">
+        <h4>2 &middot; When to stop out</h4>
+        <div class="plan-val">{{ a.stop|inr }}</div>
+        <p class="plan-note">
+          Placed {{ a.stop_basis }}. Risk <strong>Rs{{ a.risk_per_share|inr }}</strong> per share
+          {%- if a.entry_zone_high %}, {{ (a.risk_per_share / a.entry_zone_high * 100)|round(1) }}% below entry{% endif %}.
+          If this breaks, the idea is wrong. Exit without renegotiating.
+        </p>
+      </div>
+
+      <div class="plan-cell plan-target">
+        <h4>3 &middot; Where to take profit</h4>
+        <div class="plan-val">{{ a.target_2r|inr }}</div>
+        <div class="ladder">
+          <span>+1R {{ a.target_1r|inr }}</span>
+          <span>+2R {{ a.target_2r|inr }}</span>
+          <span>+3R {{ a.target_3r|inr }}</span>
+        </div>
+        <p class="plan-note">
+          Room to Rs{{ a.structural_target|inr }} using {{ a.target_basis }},
+          a <strong>{{ a.reward_risk }}:1</strong> payoff against the stop.
+        </p>
+      </div>
+
+      <div class="plan-cell plan-size">
+        <h4>4 &middot; How much</h4>
+        <div class="plan-val">{{ i.plan.quantity }} sh</div>
+        <p class="plan-note">
+          Rs{{ i.plan.capital_deployed|inr }} deployed, {{ i.plan.pct_of_capital }}% of capital.
+          Worst case at the stop: <strong class="red">Rs{{ i.plan.max_loss_at_stop|inr }}</strong>
+          ({{ i.plan.pct_capital_at_risk }}%). {{ i.plan.sizing_note }}
+        </p>
+      </div>
+    </div>
+
+    <div class="exits">
+      <h4>Exit rules, fixed now so you do not improvise later</h4>
+      <dl>
+        <dt>Scale out</dt><dd>{{ a.trail_rule }}</dd>
+        <dt>Trend break</dt><dd>{{ a.signal_exit_rule }}</dd>
+        <dt>Time stop</dt>
+        <dd>
+          No +1R within about {{ a.time_stop_days }} days means the setup failed.
+          Close it and free the capital, even if it has not lost much.
+        </dd>
+        <dt>Invalidation</dt><dd>{{ a.entry_invalidation }}</dd>
+      </dl>
+    </div>
+
+    {% if i.base_rate %}
+      <div class="baserate {% if not i.base_rate.reliable %}baserate-thin{% endif %}">
+        <strong>Historically on this stock:</strong>
+        this setup reached +1R before its stop
+        <strong>{{ i.base_rate.win_rate_pct }}%</strong> of the time across
+        {{ i.base_rate.samples }} past occurrences.
+        {{ i.base_rate.note }}
+        {% if not i.base_rate.reliable %}<span class="flag">Sample too small to lean on.</span>{% endif %}
+      </div>
+    {% endif %}
+
+    {% if i.warnings %}
+      <ul class="warns">{% for w in i.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    <details>
+      <summary>Why it ranked here &middot; {{ i.signals|length }} signals, {{ i.confidence|lower }} confidence</summary>
+      <div class="reveal cols2">
+        <div>
+          <h4>Factor scores</h4>
+          <div class="factors">
+            {% for name, val in i.factors.as_dict().items() %}
+              <div class="fbar">
+                <span class="fbar-name">{{ name }}{% if name == 'fundamental' and not i.factors.fundamental_available %} *{% endif %}</span>
+                <span class="fbar-track"><span class="fbar-fill" style="width:{{ val }}%"></span></span>
+                <span class="fbar-val">{{ val }}</span>
+              </div>
+            {% endfor %}
+          </div>
+          {% if not i.factors.fundamental_available %}
+            <p class="hint">* fundamentals unavailable; that weight was redistributed across the technical factors.</p>
+          {% endif %}
+
+          <h4 style="margin-top:1.1rem">Confidence reasoning</h4>
+          <ul class="reasons">{% for r in i.confidence_reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+          <p class="rationale">{{ explain(i.setup) }}</p>
+        </div>
+        <div>
+          <h4>Signals</h4>
+          <ul class="signals">
+            {% for s in i.signals %}
+              <li class="sig-{{ s.direction }}"><strong>{{ s.label }}</strong>{{ s.detail }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </details>
+  </article>
+{% endfor %}
+
+{# ====================================================== waiting =========== #}
+<div class="sec-head">
+  <h2>Waiting for a trigger</h2>
+  <span class="pill" data-count-for="wait-table">{{ waiting|length }}</span>
+  <div class="sec-tools filter-row">
+    <input type="search" placeholder="Filter symbol or sector" data-filter-for="wait-table"
+           aria-label="Filter waiting list">
+    <select data-setup-for="wait-table" aria-label="Filter by setup">
+      <option value="">All setups</option>
+      {% for s in waiting|map(attribute='setup')|map('string')|unique|sort %}
+        <option value="{{ s }}">{{ s }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+<p class="sec-sub">
+  The setup is forming but the entry condition has not been met. Do not pre-empt
+  it. Put the trigger price on an alert in your broker app and let the market
+  come to you. Click any column heading to sort.
+</p>
+
+{% if waiting %}
+<div class="table-wrap"><div class="table-scroll">
+  <table id="wait-table" data-sortable>
+    <thead>
+      <tr>
+        <th>Symbol</th>
+        <th data-nosort>Setup</th>
+        <th data-type="num">Last</th>
+        <th data-type="num">Buy only above</th>
+        <th data-type="num">Stop</th>
+        <th data-type="num">+2R</th>
+        <th data-type="num">R:R</th>
+        <th data-type="num">Score</th>
+        <th data-type="num">Base rate</th>
+        <th data-nosort>40d trend</th>
+        <th data-nosort>Hold</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for i in waiting %}
+        {% set a = i.action %}
+        <tr data-setup="{{ i.setup }}">
+          <td class="t-sym">
+            {% if has_stock_page(i.symbol) %}<a href="{{ stock_url(i.symbol) }}">{{ i.symbol }}</a>{% else %}{{ i.symbol }}{% endif %}
+            <span class="sub" style="display:block">{{ i.sector }}</span>
+          </td>
+          <td class="t-dim">
+            {{ i.setup }}
+            <span class="sub" style="display:block">{{ i.confidence|lower }} confidence</span>
+          </td>
+          <td class="t-num"{% if not static_mode %} data-live-price="{{ i.symbol }}"{% endif %}>{{ i.last_price|inr }}</td>
+          <td class="t-num t-trigger">{% if a.entry_trigger %}{{ a.entry_trigger|inr }}{% else %}&ndash;{% endif %}</td>
+          <td class="t-num t-stop">{{ a.stop|inr }}</td>
+          <td class="t-num t-target">{{ a.target_2r|inr }}</td>
+          <td class="t-num">{{ a.reward_risk }}</td>
+          <td class="t-num">{{ i.composite_score }}</td>
+          <td class="t-num" data-sort="{{ i.base_rate.win_rate_pct if i.base_rate else -1 }}">
+            {% if i.base_rate %}
+              {{ i.base_rate.win_rate_pct }}%
+              <span class="sub">n={{ i.base_rate.samples }}{% if not i.base_rate.reliable %} thin{% endif %}</span>
+            {% else %}&ndash;{% endif %}
+          </td>
+          <td class="sparkcell" data-spark="{{ i.spark|tojson }}" data-w="80" data-h="22"></td>
+          <td class="t-dim">{{ i.horizon_label }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div></div>
+{% else %}
+  <div class="empty"><strong>Watchlist is empty</strong>
+  <p>No setups are currently forming in {{ result.universe }}.</p></div>
+{% endif %}
+
+{# ====================================================== screened out ====== #}
+<details style="margin-top:2rem">
+  <summary>Screened out &middot; {{ avoid|length }} names with no valid long setup</summary>
+  <div class="reveal">
+    <p class="sec-sub">
+      Shown for completeness. Most are in downtrends, where long setups have poor
+      odds regardless of how attractive the company looks.
+    </p>
+    <div class="table-wrap"><div class="table-scroll">
+      <table id="avoid-table" data-sortable>
+        <thead>
+          <tr>
+            <th>Symbol</th><th data-nosort>Reason</th>
+            <th data-type="num">Last</th><th data-type="num">Score</th>
+            <th data-nosort>Sector</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for i in avoid %}
+            <tr>
+              <td class="t-sym">{% if has_stock_page(i.symbol) %}<a href="{{ stock_url(i.symbol) }}">{{ i.symbol }}</a>{% else %}{{ i.symbol }}{% endif %}</td>
+              <td class="t-dim">{{ i.setup }}</td>
+              <td class="t-num">{{ i.last_price|inr }}</td>
+              <td class="t-num">{{ i.composite_score }}</td>
+              <td class="t-dim">{{ i.sector }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div></div>
+  </div>
+</details>
+
+{# ====================================================== footer meta ====== #}
+<details style="margin-top:1.2rem">
+  <summary>Scan details and data source health</summary>
+  <div class="reveal">
+    <table class="kv kv-sm" style="max-width:640px">
+      <tbody>
+        <tr><td>Universe</td><td>{{ result.universe }}</td></tr>
+        <tr><td>Symbols scanned</td><td>{{ result.scanned }}</td></tr>
+        <tr><td>Filtered on liquidity or history</td><td>{{ result.skipped }}</td></tr>
+        <tr><td>Generated at</td><td>{{ result.generated_at }}</td></tr>
+        {% for k, v in result.source_health.items() %}
+          <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+
+{% endif %}
+{% endblock %}

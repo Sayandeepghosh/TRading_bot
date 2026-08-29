@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+#  Caddy reverse proxy: automatic HTTPS plus a password, in front of the app.
+#
+#  This matters. The dashboard has no authentication of its own, and /settings
+#  and the holdings routes accept writes. Exposing it to the internet without
+#  something in front means anyone who finds the IP can change your capital or
+#  delete your positions.
+#
+#  Install on Ubuntu:
+#    sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+#    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+#      | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+#    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+#      | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+#    sudo apt update && sudo apt install caddy
+#
+#  Generate a password hash:
+#    caddy hash-password --plaintext 'your-strong-password'
+#
+#  Then put this file at /etc/caddy/Caddyfile, replacing the domain and hash:
+#    sudo systemctl reload caddy
+#
+#  Caddy fetches and renews a free Let's Encrypt certificate automatically, so
+#  you get real HTTPS with no cost and no cron job.
+# ---------------------------------------------------------------------------
+
+analyser.example.com {
+
+	# Replace the hash with the output of `caddy hash-password`.
+	# Without this block the dashboard is world-writable. Do not remove it.
+	basic_auth {
+		you $2a$14$REPLACE_WITH_YOUR_OWN_BCRYPT_HASH
+	}
+
+	# WebSocket upgrades pass through reverse_proxy untouched in Caddy v2, so the
+	# live quote stream needs no special handling here.
+	reverse_proxy 127.0.0.1:8000 {
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/analyser.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
+
+# No domain? Use Caddy's free sslip.io-style hostname or an internal-only setup:
+#
+# :80 {
+#     basic_auth { you $2a$14$YOUR_HASH }
+#     reverse_proxy 127.0.0.1:8000
+# }
+#
+# Plain HTTP sends your password in clear text. Only acceptable over a VPN
+# such as Tailscale, never across the open internet.

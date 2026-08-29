@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}My positions &middot; Equity Analyser{% endblock %}
+
+{% block content %}
+
+<div class="sec-head" style="margin-top:0">
+  <h2>When to stop</h2>
+  <span class="pill">{{ reviews|length }} position{{ 's' if reviews|length != 1 }}</span>
+  {% if action_count %}
+    <span class="pill" style="color:var(--amber)">{{ action_count }} needing action</span>
+  {% endif %}
+</div>
+<p class="sec-sub">
+  Record what you bought in your broker app and this re-checks every position
+  against the same rules each time you open the page. The verdict is mechanical
+  on purpose: it removes the moment where you talk yourself into holding a loser
+  because it "has to come back".
+</p>
+
+{% if reviews %}
+<section class="summary">
+  <div class="stat">
+    <span class="lbl">Invested</span>
+    <div class="stat-val" style="font-size:1.2rem">{{ invested|money }}</div>
+  </div>
+  <div class="stat">
+    <span class="lbl">Current value</span>
+    <div class="stat-val" style="font-size:1.2rem">{{ current|money }}</div>
+  </div>
+  <div class="stat {% if total_pnl >= 0 %}accent-green{% else %}accent-red{% endif %}">
+    <span class="lbl">Open P&amp;L</span>
+    <div class="stat-val" style="font-size:1.2rem">{{ total_pnl|money }}</div>
+    <div class="stat-sub">{{ pnl_pct|signed }}%</div>
+  </div>
+  <div class="stat {% if action_count %}accent-amber{% endif %}">
+    <span class="lbl">Need action</span>
+    <div class="stat-val" style="font-size:1.2rem">{{ action_count }}</div>
+    <div class="stat-sub">of {{ reviews|length }}</div>
+  </div>
+</section>
+{% endif %}
+
+{% for r in reviews %}
+  <article class="pos v-{{ r.verdict|lower|replace(' ', '-') }}">
+    <div class="pos-head">
+      <div>
+        <div class="idea-title">
+          <a class="idea-sym" href="{{ stock_url(r.symbol) }}">{{ r.symbol }}</a>
+        </div>
+        <div class="pos-meta">
+          {{ r.quantity }} shares at Rs{{ r.entry_price|inr }}
+          &middot; bought {{ r.entry_date }}
+          &middot; held {{ r.days_held }} day{{ 's' if r.days_held != 1 }}
+        </div>
+      </div>
+      <span class="verdict">{{ r.verdict }}</span>
+    </div>
+
+    <div class="pos-nums">
+      <div><span class="lbl">Now</span><strong>Rs{{ r.last_price|inr }}</strong></div>
+      <div>
+        <span class="lbl">P&amp;L</span>
+        <strong class="{% if r.pnl_abs >= 0 %}green{% else %}red{% endif %}">{{ r.pnl_abs|money }}</strong>
+        <span class="sub">{{ r.pnl_pct|signed }}%</span>
+      </div>
+      {% if r.r_multiple is not none %}
+        <div>
+          <span class="lbl">R multiple</span>
+          <strong class="{% if r.r_multiple >= 0 %}green{% else %}red{% endif %}">{{ r.r_multiple }}R</strong>
+        </div>
+      {% endif %}
+      <div>
+        <span class="lbl">Your stop</span>
+        <strong class="{% if r.current_stop %}red{% else %}amber{% endif %}">
+          {% if r.current_stop %}Rs{{ r.current_stop|inr }}{% else %}not set{% endif %}
+        </strong>
+      </div>
+      {% if r.suggested_stop %}
+        <div><span class="lbl">Suggested stop</span><strong>Rs{{ r.suggested_stop|inr }}</strong></div>
+      {% endif %}
+      {% if r.next_target %}
+        <div><span class="lbl">Next target</span><strong class="green">Rs{{ r.next_target|inr }}</strong></div>
+      {% endif %}
+    </div>
+
+    <p class="headline">{{ r.headline }}</p>
+
+    {% if r.reasons %}
+      <ul class="reasons">{% for x in r.reasons %}<li>{{ x }}</li>{% endfor %}</ul>
+    {% endif %}
+
+    <div class="todo">
+      <h4>Do this</h4>
+      <ul>{% for x in r.actions %}<li>{{ x }}</li>{% endfor %}</ul>
+    </div>
+
+    <div class="pos-foot">
+      {% if r.suggested_stop and (not r.current_stop or r.suggested_stop > r.current_stop) %}
+        <form method="post" action="{{ action('holdings/stop') }}">
+          <input type="hidden" name="symbol" value="{{ r.symbol }}">
+          <input type="hidden" name="entry_date" value="{{ r.entry_date }}">
+          <input type="hidden" name="stop_price" value="{{ r.suggested_stop }}">
+          <button class="btn btn-sm" type="submit">Raise stop to Rs{{ r.suggested_stop|inr }}</button>
+        </form>
+      {% endif %}
+      <form method="post" action="{{ action('holdings/stop') }}">
+        <input type="hidden" name="symbol" value="{{ r.symbol }}">
+        <input type="hidden" name="entry_date" value="{{ r.entry_date }}">
+        <input class="num" name="stop_price" type="number" step="0.01" placeholder="Set stop"
+               style="width:120px;background:var(--bg);border:1px solid var(--line);color:var(--text);padding:.28rem .5rem;border-radius:6px;font:inherit;font-size:.8rem">
+        <button class="btn btn-ghost btn-sm" type="submit">Update</button>
+      </form>
+      <a class="btn btn-ghost btn-sm" href="{{ stock_url(r.symbol) }}">Full analysis</a>
+      <form method="post" action="{{ action('holdings/delete') }}" onsubmit="return confirm('Remove {{ r.symbol }} from your positions?')">
+        <input type="hidden" name="symbol" value="{{ r.symbol }}">
+        <input type="hidden" name="entry_date" value="{{ r.entry_date }}">
+        <button class="btn btn-danger btn-sm" type="submit">Remove</button>
+      </form>
+    </div>
+  </article>
+{% endfor %}
+
+{% if unresolved %}
+  <div class="alert alert-amber">
+    <div class="alert-body">
+      <h3>{{ unresolved|length }} position{{ 's' if unresolved|length != 1 }} could not be priced</h3>
+      <p class="dim">
+        No price data came back for
+        {% for h in unresolved %}<strong>{{ h.symbol }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}.
+        Check the symbol matches the exact NSE ticker.
+      </p>
+    </div>
+  </div>
+{% endif %}
+
+{% if not reviews and not unresolved %}
+  <div class="empty">
+    <strong>No positions recorded</strong>
+    <p>
+      Add what you own below, or use the <em>Log this trade</em> form on any stock
+      page. Once recorded, this page tells you when to tighten the stop, take
+      partial profit, or get out.
+    </p>
+  </div>
+{% endif %}
+
+<section class="card" style="margin-top:2rem">
+  <h3>Add a position</h3>
+  <p class="hint" style="margin-bottom:1rem">
+    Setting a stop matters. Without one, this page falls back to a volatility
+    estimate and cannot tell you when <em>your own</em> plan was broken.
+  </p>
+  <form method="post" action="{{ action('holdings/add') }}" class="form-grid">
+    <div class="field">
+      <label>Symbol</label>
+      <input name="symbol" required placeholder="TITAN" pattern="[A-Za-z0-9&\-]+"
+             autocapitalize="characters" spellcheck="false">
+      <span class="help">Exact NSE ticker</span>
+    </div>
+    <div class="field">
+      <label>Quantity</label>
+      <input name="quantity" type="number" min="1" required placeholder="10">
+    </div>
+    <div class="field">
+      <label>Buy price</label>
+      <input name="entry_price" type="number" step="0.01" min="0.01" required placeholder="5140.00">
+    </div>
+    <div class="field">
+      <label>Buy date</label>
+      <input name="entry_date" type="date" required value="{{ today }}">
+    </div>
+    <div class="field">
+      <label>Your stop <span class="opt">recommended</span></label>
+      <input name="stop_price" type="number" step="0.01" placeholder="4956.00">
+    </div>
+    <div class="field">
+      <label>Your target <span class="opt">optional</span></label>
+      <input name="target_price" type="number" step="0.01" placeholder="5560.00">
+    </div>
+    <div class="field wide">
+      <label>Notes <span class="opt">optional</span></label>
+      <input name="notes" placeholder="Trend continuation, bought on pullback to 21 EMA" maxlength="300">
+    </div>
+    <div class="field">
+      <label>&nbsp;</label>
+      <button class="btn" type="submit">Add position</button>
+    </div>
+  </form>
+</section>
+
+{% endblock %}

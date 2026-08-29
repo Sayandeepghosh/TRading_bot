@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}{{ symbol }} not found &middot; Equity Analyser{% endblock %}
+
+{% block content %}
+<div class="empty" style="margin-top:2rem">
+  <strong>No data for {{ symbol }}</strong>
+  <p>
+    Either the symbol does not exist on NSE, or the data provider has no price
+    history for it. Check the spelling against the exact NSE ticker.
+    {% if not static_mode %}
+      For example <a href="{{ stock_url('RELIANCE') }}">RELIANCE</a>,
+      <a href="{{ stock_url('TITAN') }}">TITAN</a>, or
+      <a href="{{ stock_url('BAJAJ-AUTO') }}">BAJAJ-AUTO</a>.
+    {% else %}
+      This snapshot only includes pages for the top-ranked names, so a valid
+      symbol outside that list will land here too. Use the search box, or
+      browse the full list from the dashboard.
+    {% endif %}
+  </p>
+  <p class="hint">
+    Newly listed companies and SME-board stocks often have too little history for
+    a 200-day average, so they get filtered out even when the ticker is correct.
+  </p>
+  <a class="btn btn-ghost" href="{{ page('') }}">Back to opportunities</a>
+</div>
+{% endblock %}

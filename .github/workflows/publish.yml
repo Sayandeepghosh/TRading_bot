@@ -1,0 +1,118 @@
+# ---------------------------------------------------------------------------
+#  Build the dashboard snapshot and publish it to GitHub Pages.
+#
+#  GitHub Pages cannot run Python, so the Python runs here instead: this job
+#  does the scan on a GitHub runner, renders static HTML, and deploys that.
+#
+#  Schedule is in UTC. 12:30 UTC = 18:00 IST, comfortably after the NSE close
+#  at 15:30 IST, so each build uses settled end-of-day data.
+#
+#  Cron on GitHub is best-effort. Runs can be delayed by several minutes under
+#  load, and scheduled workflows are disabled automatically after 60 days of no
+#  repository activity. Use the manual trigger whenever you want it now.
+# ---------------------------------------------------------------------------
+name: Publish dashboard
+
+on:
+  schedule:
+    - cron: "30 12 * * 1-5"   # weekdays, 18:00 IST
+  workflow_dispatch:           # manual "Run workflow" button
+    inputs:
+      universe:
+        description: "Index to scan"
+        required: false
+        default: "NIFTY100"
+        type: choice
+        options: [NIFTY50, NIFTY100, NIFTY200, NIFTY500]
+      stock_pages:
+        description: "How many per-stock pages to render"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two publishes race each other.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Cache the price database between runs. Without this every build
+      # re-downloads years of history for the whole universe, which is slow and
+      # rude to a free data provider.
+      - name: Restore price cache
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: prices-${{ github.run_id }}
+          restore-keys: |
+            prices-
+
+      - name: Build static site
+        env:
+          UNIVERSE: ${{ github.event.inputs.universe || 'NIFTY100' }}
+          STOCK_PAGES: ${{ github.event.inputs.stock_pages || '60' }}
+        run: |
+          python run.py --build-static docs \
+            --universe "$UNIVERSE" \
+            --stock-pages "$STOCK_PAGES"
+
+      - name: Report what was built
+        run: |
+          echo "### Dashboard snapshot built" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pages: $(find docs -name '*.html' | wc -l)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Size: $(du -sh docs | cut -f1)" >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d = json.load(open("docs/data/scan.json"))
+          c = d["context"]
+          ready = sum(
+              1 for i in d["ideas"]
+              if i.get("action") and i["action"]["entry_state"] == "Buy zone active"
+          )
+          print(f"- Universe: {d['universe']}, {d['scanned']} scanned")
+          print(f"- Regime: {c['regime']} (Nifty {c['nifty_last']:,.2f})")
+          print(f"- Ready to buy: {ready}")
+          PY
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

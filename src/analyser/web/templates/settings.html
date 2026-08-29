@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Settings &middot; Equity Analyser{% endblock %}
+
+{% block content %}
+
+<h1>Settings</h1>
+<p class="sec-sub">
+  Saved to <code class="mono">config/config.yaml</code> and applied immediately,
+  which triggers a fresh scan. The two that change your results most are capital
+  and risk per trade, because every position size derives from them.
+</p>
+
+{% if saved %}
+  <div class="alert alert-green">
+    <div class="alert-body"><strong>Saved.</strong> A rescan is running with the new settings.</div>
+    <div class="alert-actions"><a class="btn btn-ghost btn-sm" href="{{ page('') }}">View results</a></div>
+  </div>
+{% endif %}
+{% if err %}
+  <div class="alert alert-red">
+    <div class="alert-body"><strong>Not saved.</strong> <span class="mono">{{ err }}</span></div>
+  </div>
+{% endif %}
+
+<form method="post" action="{{ action('settings') }}" id="settings-form">
+
+  <section class="card">
+    <h3>Risk and position sizing</h3>
+    <p class="hint" style="margin-bottom:1rem">
+      This is the part that actually protects you. Position size is derived from
+      what you are willing to lose, never from what you hope to gain.
+    </p>
+    <div class="form-grid">
+      <div class="field">
+        <label>Capital (Rs)</label>
+        <input name="capital" type="number" step="1000" min="1000"
+               value="{{ cfg.risk.capital|round(0)|int }}" required>
+        <span class="help">Total investable amount</span>
+      </div>
+      <div class="field">
+        <label>Risk per trade (%)</label>
+        <input name="risk_per_trade_pct" type="number" step="0.1" min="0.1" max="10"
+               value="{{ cfg.risk.risk_per_trade_pct }}" required>
+        <span class="help">
+          Loss if the stop hits. 1% of Rs{{ cfg.risk.capital|inr }}
+          is Rs{{ (cfg.risk.capital * cfg.risk.risk_per_trade_pct / 100)|inr }}
+        </span>
+      </div>
+      <div class="field">
+        <label>Max position (%)</label>
+        <input name="max_position_pct" type="number" step="1" min="1" max="100"
+               value="{{ cfg.risk.max_position_pct }}" required>
+        <span class="help">Concentration cap per stock</span>
+      </div>
+      <div class="field">
+        <label>Min reward:risk</label>
+        <input name="min_reward_risk" type="number" step="0.1" min="0.1"
+               value="{{ cfg.risk.min_reward_risk }}" required>
+        <span class="help">Flag ideas paying less than this</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>What to scan</h3>
+    <div class="form-grid">
+      <div class="field">
+        <label>Universe</label>
+        <select name="index">
+          {% for opt, note in [
+              ('NIFTY50',  'Nifty 50 - fastest, ~12s'),
+              ('NIFTY100', 'Nifty 100 - balanced'),
+              ('NIFTY200', 'Nifty 200 - ~45s'),
+              ('NIFTY500', 'Nifty 500 - widest, slowest')] %}
+            <option value="{{ opt }}" {% if cfg.universe.index == opt %}selected{% endif %}>{{ note }}</option>
+          {% endfor %}
+        </select>
+        <span class="help">Larger finds more, takes longer</span>
+      </div>
+      <div class="field">
+        <label>Min daily turnover (Rs crore)</label>
+        <input name="min_avg_turnover_cr" type="number" step="0.5" min="0"
+               value="{{ cfg.universe.min_avg_turnover_cr }}" required>
+        <span class="help">Liquidity floor, 20-day average</span>
+      </div>
+      <div class="field">
+        <label>Fundamentals depth</label>
+        <input name="fundamentals_top_n" type="number" step="5" min="0" max="200"
+               value="{{ cfg.data.fundamentals_top_n }}" required>
+        <span class="help">Top N candidates get fundamentals. Each costs one request.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h3>Scoring weights</h3>
+    <p class="hint" style="margin-bottom:1rem">
+      How much each factor counts toward the composite score. They are normalised
+      automatically, so you do not need to make them sum to exactly 1.
+      Raise <strong>fundamental</strong> for longer holding periods; raise
+      <strong>momentum</strong> and <strong>volume</strong> for shorter swings.
+    </p>
+    <div class="form-grid">
+      <div class="field">
+        <label>Trend</label>
+        <input name="w_trend" data-weight type="number" step="0.05" min="0" max="1"
+               value="{{ cfg.weights.trend }}" required>
+      </div>
+      <div class="field">
+        <label>Momentum</label>
+        <input name="w_momentum" data-weight type="number" step="0.05" min="0" max="1"
+               value="{{ cfg.weights.momentum }}" required>
+      </div>
+      <div class="field">
+        <label>Volume</label>
+        <input name="w_volume" data-weight type="number" step="0.05" min="0" max="1"
+               value="{{ cfg.weights.volume }}" required>
+      </div>
+      <div class="field">
+        <label>Volatility</label>
+        <input name="w_volatility" data-weight type="number" step="0.05" min="0" max="1"
+               value="{{ cfg.weights.volatility }}" required>
+      </div>
+      <div class="field">
+        <label>Fundamental</label>
+        <input name="w_fundamental" data-weight type="number" step="0.05" min="0" max="1"
+               value="{{ cfg.weights.fundamental }}" required>
+      </div>
+    </div>
+    <p class="weights-note">Current sum: <span id="weight-sum">-</span> (normalised to 1.00 on save)</p>
+  </section>
+
+  <div class="form-foot">
+    <button class="btn" type="submit">Save and rescan</button>
+    <a class="btn btn-ghost" href="{{ page('') }}">Cancel</a>
+  </div>
+</form>
+
+<section class="card" style="margin-top:1.5rem">
+  <h3>Advanced</h3>
+  <p class="hint">
+    Indicator periods, setup thresholds, and base-rate settings are not exposed
+    here because changing them invalidates the historical comparisons shown
+    against each idea. Edit <code class="mono">config/config.yaml</code> directly
+    if you need them, then restart. The file is commented throughout.
+  </p>
+  <table class="kv kv-sm" style="max-width:520px;margin-top:.8rem">
+    <tbody>
+      <tr><td>Price history</td><td>{{ cfg.data.history_days }} days</td></tr>
+      <tr><td>Moving averages</td><td>{{ cfg.indicators.sma_fast }} / {{ cfg.indicators.sma_slow }} day</td></tr>
+      <tr><td>ATR stop, trend setups</td><td>{{ cfg.risk.atr_stop_multiple_trend }}x</td></tr>
+      <tr><td>ATR stop, swing setups</td><td>{{ cfg.risk.atr_stop_multiple_swing }}x</td></tr>
+      <tr><td>ADX trend threshold</td><td>{{ cfg.setups.adx_trending }}</td></tr>
+      <tr><td>Volume surge ratio</td><td>{{ cfg.setups.volume_surge_ratio }}x</td></tr>
+      <tr><td>Base rate min samples</td><td>{{ cfg.base_rate.min_samples }}</td></tr>
+      <tr><td>Cache</td><td><code class="mono">.cache/analyser.db</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+{% endblock %}

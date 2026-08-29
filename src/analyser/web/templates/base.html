@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% block title %}Equity Analyser{% endblock %}</title>
+  <link rel="stylesheet" href="{{ u('static/style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2326d07c'/><path d='M8 21l5-6 4 3 6-8' stroke='%2304120a' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  {% block head %}{% endblock %}
+</head>
+<body data-stock-base="{{ stock_base }}" data-stock-ext="{{ stock_ext }}"
+      {% block bodyattrs %}{% endblock %}>
+
+<header class="topbar">
+  <a class="brand" href="{{ page('') }}">
+    <span class="brand-mark" aria-hidden="true">&#9652;</span>
+    <span>Equity Analyser</span>
+  </a>
+  <span class="brand-sub">NSE &middot; advisory</span>
+
+  <nav class="nav">
+    <a href="{{ page('') }}" class="{% if active == 'scan' %}on{% endif %}">Opportunities</a>
+    <a href="{{ page('holdings') }}" class="{% if active == 'holdings' %}on{% endif %}">My positions</a>
+    {% if not static_mode %}
+      <a href="{{ page('settings') }}" class="{% if active == 'settings' %}on{% endif %}">Settings</a>
+    {% endif %}
+  </nav>
+
+  <div class="topbar-right">
+    <div class="search">
+      <input id="sym-search" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search any NSE symbol" aria-label="Search symbol">
+      <kbd>/</kbd>
+      <div id="sym-results" class="results" role="listbox"></div>
+    </div>
+    {% if not static_mode %}
+      <span id="live-status" class="live-pill live-shut" title="Connecting to live feed">Offline</span>
+    {% endif %}
+    {% if static_mode and universe_json %}
+      <script id="universe-data" type="application/json">{{ universe_json|tojson }}</script>
+    {% endif %}
+    {% if not static_mode %}
+      <form method="post" action="{{ action('refresh') }}">
+        <button class="btn btn-ghost btn-sm" type="submit"
+                {% if progress and progress.active %}disabled{% endif %}>
+          {%- if progress and progress.active %}<span class="spin"></span> Scanning{% else %}Refresh{% endif -%}
+        </button>
+      </form>
+    {% endif %}
+  </div>
+</header>
+
+{% if static_mode %}
+<div class="snapshot-bar">
+  <strong>Static snapshot.</strong>
+  Generated {{ generated_at }} from end-of-day data. Prices are not live and do
+  not update while this page is open. Scores, levels and base rates were computed
+  once, at build time.
+</div>
+{% endif %}
+
+<main>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="foot">
+  <p>
+    <strong>Read this before you act on anything here.</strong>
+    This tool applies fixed technical and fundamental rules to public market data
+    and shows you the result. It does not predict prices and it is not investment
+    advice. Nobody, including this software, knows which trade will make money.
+    Every level shown is a rule, not a forecast. Historical win rates describe
+    what already happened and do not carry forward. You place your own orders and
+    you carry the full loss. Never risk money you need.
+  </p>
+  <div class="foot-meta">
+    <span>Data: Yahoo Finance (~15 min delayed) &amp; NSE public files</span>
+    <span>Universe: {{ cfg.universe.index }}</span>
+    <span>Capital: Rs{{ cfg.risk.capital|inr }}</span>
+    <span>Risk/trade: {{ cfg.risk.risk_per_trade_pct }}%</span>
+    <span>{% if static_mode %}Built {{ generated_at }}{% else %}{{ now() }}{% endif %}</span>
+  </div>
+</footer>
+
+<script src="{{ plotly_src }}"></script>
+<script src="{{ u('static/charts.js') }}"></script>
+<script src="{{ u('static/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

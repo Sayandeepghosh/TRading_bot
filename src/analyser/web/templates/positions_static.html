@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}My positions &middot; Equity Analyser{% endblock %}
+
+{% block content %}
+
+<h1>Position monitoring needs the local app</h1>
+
+<div class="alert alert-amber">
+  <div class="alert-body">
+    <p>
+      This is the published snapshot, and position tracking is the one feature it
+      cannot provide. Two reasons, both structural:
+    </p>
+    <ul class="dim">
+      <li>
+        <strong>It needs live prices.</strong> Deciding whether your stop has been
+        breached requires today's price, not a price from when this page was
+        built.
+      </li>
+      <li>
+        <strong>It needs the Python engine.</strong> The exit rules read ATR,
+        swing lows, moving averages and MACD for whatever you happen to hold.
+        Reimplementing that in browser JavaScript would create a second copy of
+        the rules that can silently disagree with the first, and a stop-loss rule
+        that contradicts itself is worse than no page at all.
+      </li>
+    </ul>
+    <p class="dim" style="margin-bottom:0">
+      There is also a privacy argument for keeping it local: your positions never
+      need to touch a public site.
+    </p>
+  </div>
+</div>
+
+<section class="card">
+  <h3>Run it locally to get position monitoring</h3>
+  <p class="hint">One command. The full app, including the exit monitor, on your own machine.</p>
+  <pre class="code-block">git clone &lt;your-repo-url&gt;
+cd TRading_bot
+./start.sh</pre>
+  <p style="margin-top:.8rem">
+    Then open <code class="mono">http://127.0.0.1:8000/holdings</code>, record what
+    you bought, and each visit re-checks every position against the same rules and
+    returns one verdict:
+  </p>
+  <table class="kv" style="max-width:660px;margin-top:.8rem">
+    <tbody>
+      <tr><td><span class="badge badge-low">EXIT NOW</span></td>
+          <td>Stop breached, or the trend that justified the position has broken.</td></tr>
+      <tr><td><span class="badge" style="border-color:var(--amber);color:var(--amber)">TIME EXIT</span></td>
+          <td>Held past its horizon without working. Capital is idle; redeploy it.</td></tr>
+      <tr><td><span class="badge badge-high">TAKE PARTIAL PROFIT</span></td>
+          <td>Up 2R or more. Bank some and trail the rest.</td></tr>
+      <tr><td><span class="badge" style="border-color:var(--blue);color:var(--blue)">TIGHTEN STOP</span></td>
+          <td>Up 1R. Move the stop to breakeven so the trade can no longer lose.</td></tr>
+      <tr><td><span class="badge">HOLD</span></td>
+          <td>Nothing has changed. Do not tinker.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h3>What this snapshot does give you</h3>
+  <ul>
+    <li>Every entry trigger, stop, target ladder and position size, fully interactive</li>
+    <li>Charts with your decision levels drawn on them, zoomable and pannable</li>
+    <li>Sorting, filtering, symbol search and CSV export</li>
+    <li>Historical base rates for every setup</li>
+  </ul>
+  <p style="margin-top:.6rem">
+    <a class="btn" href="{{ page('') }}">Back to opportunities</a>
+    <a class="btn btn-ghost" href="{{ u('export.csv') }}">Download CSV</a>
+  </p>
+</section>
+
+{% endblock %}

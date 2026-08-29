@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+#  systemd unit for an always-on VM (Oracle Cloud Always Free, or any VPS).
+#
+#  Install:
+#    sudo cp deploy/analyser.service /etc/systemd/system/
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable --now analyser
+#
+#  Watch it:   journalctl -u analyser -f
+#  Restart:    sudo systemctl restart analyser
+#
+#  Adjust User= and the paths if you cloned somewhere other than
+#  /home/ubuntu/TRading_bot (Oracle's Ubuntu images default to the 'ubuntu' user).
+# ---------------------------------------------------------------------------
+[Unit]
+Description=Equity Analyser dashboard
+Documentation=https://github.com/YOUR_USER/YOUR_REPO
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/TRading_bot
+
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Kolkata
+# Bind to loopback only. Caddy terminates TLS and handles auth in front of it,
+# so the app itself is never directly reachable from the internet.
+Environment=HOST=127.0.0.1
+Environment=PORT=8000
+
+ExecStart=/home/ubuntu/TRading_bot/.venv/bin/python run.py
+
+# A scan holds a few hundred MB of pandas frames; 1G leaves headroom on a
+# 12 GB box while still catching a runaway.
+MemoryMax=1G
+Restart=always
+RestartSec=10
+# Give up only if it fails 5 times inside 5 minutes; transient network errors
+# at boot should not permanently disable the service.
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# Hardening. The app only ever needs to read its own directory and write .cache.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/TRading_bot/.cache /home/ubuntu/TRading_bot/config
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=analyser
+
+[Install]
+WantedBy=multi-user.target

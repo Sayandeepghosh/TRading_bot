@@ -1,0 +1,13 @@
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Your positions are personal. Keep them out of version control.
+config/holdings.json
+
+# Generated static snapshot. The Actions workflow rebuilds it on every run, and
+# committing 1.8MB of HTML that goes stale daily just bloats history.
+# Rebuild locally any time with:  python run.py --build-static docs
+docs/

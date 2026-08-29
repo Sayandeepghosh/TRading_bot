@@ -1,0 +1,113 @@
+# ============================================================================
+#  Stock Analyser configuration
+#  Everything here is tunable. Nothing in the code hardcodes these values.
+# ============================================================================
+
+universe:
+  # Which NSE index to scan. Options: NIFTY50 | NIFTY100 | NIFTY200 | NIFTY500
+  # Bigger = slower scan but more candidates. NIFTY100 is a good default.
+  index: NIFTY100
+
+  # Skip illiquid names: minimum 20-day average traded value in INR crore.
+  # Protects you from stocks you cannot exit without moving the price.
+  min_avg_turnover_cr: 5.0
+
+  # Hard exclusions by symbol, if you never want to see something.
+  exclude: []
+
+data:
+  # Days of daily history to pull. 200-day MA needs 200; the surplus exists so
+  # the base-rate test has enough past setup occurrences to mean anything.
+  # 750 (~3 years) is the floor for usable sample sizes.
+  history_days: 750
+
+  # Cache lifetime in minutes. During market hours, drop this to 15.
+  cache_ttl_minutes: 60
+
+  # yfinance batch size. Larger = fewer HTTP calls but bigger failure blast radius.
+  batch_size: 50
+
+  # Fetch fundamentals only for the top N technical candidates.
+  # Fundamentals need one slow HTTP call per stock, so we do not do all 500.
+  fundamentals_top_n: 40
+
+# ----------------------------------------------------------------------------
+#  Scoring weights. Must sum to 1.0 (validated at startup).
+#  Raise 'fundamental' if you are a longer-horizon investor.
+#  Raise 'momentum' and 'volume' if you are a shorter-horizon swing trader.
+# ----------------------------------------------------------------------------
+weights:
+  trend: 0.30
+  momentum: 0.25
+  volume: 0.15
+  volatility: 0.10
+  fundamental: 0.20
+
+indicators:
+  sma_fast: 50
+  sma_slow: 200
+  ema_signal: 21
+  rsi_period: 14
+  atr_period: 14
+  adx_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  volume_lookback: 20
+  roc_short: 20
+  roc_long: 60
+  swing_lookback: 10
+  bb_period: 20
+  bb_std: 2.0
+
+# ----------------------------------------------------------------------------
+#  Risk and position sizing. This is the part that actually protects you.
+# ----------------------------------------------------------------------------
+risk:
+  # Your total investable capital in INR. Used for position sizing.
+  capital: 100000
+
+  # Max % of capital you are willing to LOSE on a single idea if the stop hits.
+  # 1.0 means a losing trade costs you 1% of capital. Keep this small.
+  risk_per_trade_pct: 1.0
+
+  # Never let one position exceed this % of capital, regardless of stop distance.
+  max_position_pct: 15.0
+
+  # Stop loss distance in ATR multiples, per setup type.
+  atr_stop_multiple_trend: 2.5
+  atr_stop_multiple_swing: 1.8
+
+  # Reject any idea whose reward:risk to target 2 is below this.
+  min_reward_risk: 1.5
+
+# ----------------------------------------------------------------------------
+#  Setup detection thresholds.
+# ----------------------------------------------------------------------------
+setups:
+  adx_trending: 22.0          # ADX above this = a real trend, not chop
+  rsi_overbought: 78.0
+  rsi_oversold: 32.0
+  rsi_pullback_low: 38.0      # pullback zone in an intact uptrend
+  rsi_pullback_high: 55.0
+  breakout_proximity_pct: 3.0 # within 3% of 52-week high counts as a breakout
+  volume_surge_ratio: 1.5     # today's volume vs 20d average
+
+# ----------------------------------------------------------------------------
+#  Base rate testing. This is the honesty layer: for each detected setup we
+#  look back at how often the SAME condition led to a positive return over
+#  the suggested horizon. Small samples are reported as such.
+# ----------------------------------------------------------------------------
+base_rate:
+  enabled: true
+  min_samples: 8              # below this, confidence is downgraded
+  lookback_days: 750
+
+output:
+  # Only surface ideas scoring above this composite.
+  min_composite_score: 55.0
+  max_results: 25
+
+server:
+  host: "127.0.0.1"
+  port: 8000
