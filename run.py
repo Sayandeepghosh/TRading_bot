@@ -83,16 +83,24 @@ def main() -> int:
     host = args.host or env_host or cfg.server.host
     port = args.port or (int(env_port) if env_port and env_port.isdigit() else cfg.server.port)
 
-    if host not in ("127.0.0.1", "localhost"):
-        print(
-            "\n  NOTE: binding to "
-            f"{host}, so this dashboard is reachable from outside this machine.\n"
-            "  There is no authentication, and /settings plus the holdings routes\n"
-            "  accept writes. Put it behind a reverse proxy with auth, or a\n"
-            "  firewall rule, before exposing it to a network you do not trust.\n"
-        )
+    # Auth is resolved from the bind address: a public interface never runs
+    # unauthenticated, even if no password was configured.
+    from analyser.auth import banner, resolve_auth
+
+    auth = resolve_auth(host)
+    print()
+    print(banner(auth, host, port))
     print(f"\n  Dashboard  ->  http://{host}:{port}\n  Ctrl+C to stop\n")
-    uvicorn.run(create_app(cfg), host=host, port=port, log_level="warning")
+    uvicorn.run(
+        create_app(cfg, auth=auth),
+        host=host,
+        port=port,
+        log_level="warning",
+        # Trust X-Forwarded-* from the platform proxy so request.url.scheme is
+        # https on Render, which decides whether the session cookie is Secure.
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
     return 0
 
 

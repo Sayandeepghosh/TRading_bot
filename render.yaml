@@ -39,10 +39,26 @@ services:
       - key: ANALYSER_UNIVERSE
         value: NIFTY50
 
-      # Set your real capital in the Render dashboard rather than here, so a
-      # personal number never lands in git.
-      # - key: ANALYSER_CAPITAL
-      #   value: "100000"
+      # ---- authentication -------------------------------------------------
+      # A Render URL is public and this app has write routes (/settings, and
+      # holdings add/delete). Auth is therefore mandatory here: with no password
+      # set the app generates a random one at boot and prints it to the logs,
+      # rather than serving an unauthenticated write API to the internet.
+      #
+      # sync: false means Render prompts you for the value at deploy time and
+      # keeps it out of git. Pick something strong.
+      - key: ANALYSER_PASSWORD
+        sync: false
+
+      # Signs session cookies. Render generates it once and keeps it stable, so
+      # you stay logged in across restarts and redeploys.
+      - key: ANALYSER_SECRET_KEY
+        generateValue: true
+
+      # Set your real capital here in the dashboard rather than in config.yaml,
+      # so a personal number never lands in git.
+      - key: ANALYSER_CAPITAL
+        sync: false
       # - key: ANALYSER_RISK_PCT
       #   value: "1.0"
 

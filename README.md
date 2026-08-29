@@ -264,7 +264,33 @@ Full commands in **[`deploy/README.md`](deploy/README.md)**.
 
 **GitHub Pages** can't run Python, so it gets a daily snapshot built by [Actions](.github/workflows/publish.yml) instead — charts and levels intact, no live streaming. Pages needs a public repo or a paid plan; the workflow gates those steps behind a `PUBLISH_PAGES` variable and always uploads a downloadable artifact so it works either way.
 
-> ⚠️ **The app has no authentication.** It is built to run on `127.0.0.1`. The moment you bind it to `0.0.0.0`, `/settings` and the holdings routes are writable by anyone who can reach the port. Put a password in front ([`deploy/Caddyfile`](deploy/Caddyfile)), restrict it to your own devices with Tailscale, or keep it local.
+### Authentication
+
+Built in, and it **fails closed**. The rule is decided by the bind address:
+
+| Bind | Password set | Result |
+|---|---|---|
+| `127.0.0.1` | no | Auth **off** — a login prompt on your own laptop protects nothing |
+| `127.0.0.1` | yes | Auth on |
+| `0.0.0.0` | yes | Auth on |
+| `0.0.0.0` | **no** | Auth on with a **randomly generated password**, printed to the logs |
+
+That last row is the important one. Exposing an unauthenticated write API to the internet is never the default, even by accident.
+
+```bash
+ANALYSER_PASSWORD='something-strong' HOST=0.0.0.0 ./start.sh
+```
+
+| Variable | Purpose |
+|---|---|
+| `ANALYSER_PASSWORD` | Plaintext, hashed with scrypt at boot and never stored |
+| `ANALYSER_PASSWORD_HASH` | Pre-hashed: `python -m analyser.auth 'your-password'` |
+| `ANALYSER_SECRET_KEY` | Signs session cookies. Set it, or logins drop on restart |
+| `ANALYSER_AUTH` | `off` to force disable, `on` to force enable |
+
+Sessions are HMAC-signed cookies (HttpOnly, SameSite=Lax, Secure over TLS) — cookies rather than HTTP Basic because the browser WebSocket API can't send an `Authorization` header but does send same-origin cookies, so the live stream is covered too. Basic auth still works for `curl` and scripts. Failed logins lock an address out for 5 minutes after 8 attempts, and the `next=` parameter only accepts same-site relative paths so the login form can't be turned into an open redirect.
+
+`/api/health` stays public and returns only liveness, because platform health checks run before anyone can log in.
 
 ---
 

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Sign in &middot; Equity Analyser</title>
+  <link rel="stylesheet" href="{{ u('static/style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2326d07c'/><path d='M8 21l5-6 4 3 6-8' stroke='%2304120a' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body class="login-body">
+
+<main class="login-wrap">
+  <form class="login-card" method="post" action="/login" autocomplete="on">
+    <div class="login-brand">
+      <span class="brand-mark" aria-hidden="true">&#9652;</span>
+      <div>
+        <h1>Equity Analyser</h1>
+        <p class="dim">NSE screener &middot; advisory only</p>
+      </div>
+    </div>
+
+    {% if error %}
+      <div class="login-error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <div class="field">
+      <label for="pw">Password</label>
+      <input id="pw" name="password" type="password" required autofocus
+             autocomplete="current-password" spellcheck="false">
+    </div>
+
+    <button class="btn login-btn" type="submit">Sign in</button>
+
+    {% if generated %}
+      <p class="login-hint">
+        No password was configured, so a random one was generated and printed to
+        the server logs at startup. Set <code class="mono">ANALYSER_PASSWORD</code>
+        to choose your own, and <code class="mono">ANALYSER_SECRET_KEY</code> so
+        sessions survive a restart.
+      </p>
+    {% endif %}
+  </form>
+
+  <p class="login-foot">
+    This dashboard applies fixed rules to public market data. It is not
+    investment advice and it never places orders.
+  </p>
+</main>
+
+</body>
+</html>

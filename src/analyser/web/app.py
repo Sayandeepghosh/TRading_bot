@@ -16,12 +16,14 @@ Design notes that matter:
 from __future__ import annotations
 
 import asyncio
+import base64
 import csv
 import io
 import logging
 import threading
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import quote, urlparse
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +33,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..auth import (
+    COOKIE_NAME,
+    SESSION_TTL,
+    AuthConfig,
+    banner,
+    check_token,
+    issue_token,
+    resolve_auth,
+)
 from ..config import AppConfig, load_config, save_config
 from ..engine import Analyser, setup_explanation
 from ..holdings import Holding, HoldingsMonitor, load_holdings, save_holdings
@@ -179,8 +190,48 @@ class State:
             return []
 
 
-def create_app(cfg: AppConfig | None = None, autoscan: bool = True) -> FastAPI:
+# Reachable without a session. Everything else requires one when auth is on.
+#   /api/health  the platform health check runs before anyone can log in, so a
+#                401 here would make Render mark the deploy dead. It returns
+#                only liveness when unauthenticated.
+#   /login       obviously
+#   /static      CSS and JS are not secrets, and the login page needs them
+_PUBLIC_PATHS = frozenset({"/api/health", "/login", "/logout", "/favicon.ico"})
+_PUBLIC_PREFIXES = ("/static/",)
+
+
+def _is_public(path: str) -> bool:
+    return path in _PUBLIC_PATHS or path.startswith(_PUBLIC_PREFIXES)
+
+
+def _safe_next(target: str) -> str:
+    """Only allow same-site relative redirects.
+
+    Without this, /login?next=https://evil.example turns the login form into an
+    open redirect that lends this app's name to a phishing page.
+    """
+    if not target or not target.startswith("/") or target.startswith("//"):
+        return "/"
+    parsed = urlparse(target)
+    if parsed.scheme or parsed.netloc:
+        return "/"
+    return target
+
+
+def _is_https(request: Request) -> bool:
+    """True when the original request used TLS, honouring proxy headers."""
+    if request.url.scheme == "https":
+        return True
+    return request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+
+
+def create_app(
+    cfg: AppConfig | None = None,
+    autoscan: bool = True,
+    auth: AuthConfig | None = None,
+) -> FastAPI:
     state = State(cfg or load_config())
+    auth = auth if auth is not None else resolve_auth("127.0.0.1")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -203,9 +254,129 @@ def create_app(cfg: AppConfig | None = None, autoscan: bool = True) -> FastAPI:
     )
     app.state.core = state
 
+    app.state.auth = auth
+
     static_dir = WEB_DIR / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # ------------------------------------------------------------------- auth
+
+    def _client_addr(request: Request) -> str:
+        """Client address for rate limiting.
+
+        Behind Render or Caddy the socket peer is the proxy, so the real client
+        is the first entry in X-Forwarded-For. Only the leftmost hop is taken;
+        the rest is attacker-controllable.
+        """
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            return fwd.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+    def _authed(request: Request) -> bool:
+        if not auth.enabled:
+            return True
+        token = request.cookies.get(COOKIE_NAME)
+        if token and check_token(auth.secret, token):
+            return True
+        # Basic auth, so curl and scripts still work without a browser session.
+        header = request.headers.get("authorization", "")
+        if header.lower().startswith("basic "):
+            try:
+                raw = base64.b64decode(header[6:]).decode("utf-8", "replace")
+                _, _, pw = raw.partition(":")
+            except (ValueError, TypeError):
+                return False
+            return auth.check(pw)
+        return False
+
+    @app.middleware("http")
+    async def require_auth(request: Request, call_next):
+        if not auth.enabled or _is_public(request.url.path):
+            return await call_next(request)
+
+        if _authed(request):
+            return await call_next(request)
+
+        # HTML gets a login page; anything else gets a clean 401.
+        accepts_html = "text/html" in request.headers.get("accept", "")
+        if accepts_html and request.method == "GET":
+            nxt = request.url.path
+            if request.url.query:
+                nxt += "?" + request.url.query
+            return RedirectResponse(f"/login?next={quote(nxt, safe='')}", status_code=303)
+        return JSONResponse(
+            {"error": "authentication required"},
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Equity Analyser"'},
+        )
+
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request, next: str = "/", error: str = ""):
+        if not auth.enabled:
+            return RedirectResponse("/", status_code=303)
+        if _authed(request):
+            return RedirectResponse(_safe_next(next), status_code=303)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "cfg": state.cfg,
+                "next": _safe_next(next),
+                "error": error,
+                "generated": auth.generated_password is not None,
+                **SERVER.as_globals(),
+                "generated_at": "",
+            },
+            status_code=401 if error else 200,
+        )
+
+    @app.post("/login")
+    async def login_submit(
+        request: Request, password: str = Form(...), next: str = Form("/")
+    ):
+        addr = _client_addr(request)
+        target = _safe_next(next)
+
+        locked = auth.is_locked(addr)
+        if locked:
+            return RedirectResponse(
+                f"/login?next={quote(target, safe='')}"
+                f"&error=Too+many+attempts.+Try+again+in+{int(locked)}s.",
+                status_code=303,
+            )
+
+        if not auth.check(password):
+            auth.record_failure(addr)
+            log.warning("auth: failed login from %s", addr)
+            return RedirectResponse(
+                f"/login?next={quote(target, safe='')}&error=Incorrect+password.",
+                status_code=303,
+            )
+
+        auth.record_success(addr)
+        resp = RedirectResponse(target, status_code=303)
+        resp.set_cookie(
+            COOKIE_NAME,
+            issue_token(auth.secret),
+            max_age=SESSION_TTL,
+            httponly=True,
+            samesite="lax",
+            # Only mark Secure when the request actually arrived over TLS,
+            # otherwise the cookie is silently dropped on plain-HTTP localhost.
+            secure=_is_https(request),
+            path="/",
+        )
+        log.info("auth: login from %s", addr)
+        return resp
+
+    @app.post("/logout")
+    @app.get("/logout")
+    async def logout():
+        resp = RedirectResponse("/login", status_code=303)
+        resp.delete_cookie(COOKIE_NAME, path="/")
+        return resp
 
     TEMPLATES.env.filters["inr"] = _inr
     TEMPLATES.env.filters["money"] = _money
@@ -221,6 +392,7 @@ def create_app(cfg: AppConfig | None = None, autoscan: bool = True) -> FastAPI:
             "progress": state.progress,
             "has_result": state.result is not None,
             "explain": setup_explanation,
+            "auth_enabled": auth.enabled,
         }
         base.update(kw)
         return base
@@ -591,6 +763,15 @@ def create_app(cfg: AppConfig | None = None, autoscan: bool = True) -> FastAPI:
           {"type": "session", "session": {...}}
           {"type": "pong"}
         """
+        # Middleware does not cover WebSocket scope, so gate it here. Browsers
+        # send same-origin cookies on the upgrade request, which is exactly why
+        # sessions are cookie-based rather than HTTP Basic.
+        if auth.enabled:
+            token = ws.cookies.get(COOKIE_NAME)
+            if not token or not check_token(auth.secret, token):
+                await ws.close(code=1008, reason="authentication required")
+                return
+
         await ws.accept()
         queue = state.live.add_client()
         mine: set[str] = set()
@@ -659,9 +840,18 @@ def create_app(cfg: AppConfig | None = None, autoscan: bool = True) -> FastAPI:
         return JSONResponse([r.to_dict() for r in reviews])
 
     @app.get("/api/health")
-    async def api_health():
+    async def api_health(request: Request):
+        """Public liveness probe.
+
+        Platform health checks run before anyone can log in, so this must never
+        401. When unauthenticated it reports only that the process is alive, and
+        leaks nothing about the portfolio or configuration.
+        """
+        if auth.enabled and not _authed(request):
+            return {"status": "ok", "auth": "required"}
         return {
             "status": "ok",
+            "auth": "enabled" if auth.enabled else "disabled",
             "universe": state.cfg.universe.index,
             "has_result": state.result is not None,
             "last_scan": state.result.generated_at if state.result else None,

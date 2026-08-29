@@ -135,15 +135,41 @@ rebuilds do not re-download years of history.
 
 ---
 
-## Security, briefly
+## Security
 
-The dashboard ships with no authentication because it is built to run on
-`127.0.0.1`. The moment you bind it to `0.0.0.0`, `/settings` and the holdings
-routes are writable by anyone who can reach the port. `run.py` prints a warning
-when you do this.
+Authentication is built in and **fails closed**: binding to anything other than
+loopback turns it on. If you have not set a password, the app generates a random
+one at boot and prints it to the logs rather than serving an unauthenticated
+write API to the internet.
 
-Put a password in front of it (Caddy basic auth), restrict it to your own
-devices (Tailscale), or keep it local. Do not skip this on a public IP.
+Set your own so it stays stable across restarts:
+
+```bash
+# in the platform dashboard, or the shell
+ANALYSER_PASSWORD='something-strong'
+ANALYSER_SECRET_KEY='...'            # signs sessions; without it logins drop on restart
+```
+
+On Render both are already declared in `render.yaml` — the password is prompted
+at deploy time (`sync: false`, so it never enters git) and the secret key is
+generated automatically.
+
+Prefer a pre-hashed password if you would rather not put plaintext in a
+dashboard:
+
+```bash
+python -m analyser.auth 'your-password'    # -> ANALYSER_PASSWORD_HASH
+```
+
+Caddy basic auth (`deploy/Caddyfile`) is still useful on your own VM as a second
+layer and to keep unauthenticated traffic off the app entirely, but it is no
+longer the only thing standing between the internet and your config.
+
+To deliberately run without auth on a trusted private network:
+
+```bash
+ANALYSER_AUTH=off
+```
 
 ## What "live" actually means here
 

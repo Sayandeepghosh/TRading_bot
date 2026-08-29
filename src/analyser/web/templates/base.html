@@ -47,6 +47,11 @@
           {%- if progress and progress.active %}<span class="spin"></span> Scanning{% else %}Refresh{% endif -%}
         </button>
       </form>
+      {% if auth_enabled %}
+        <form method="post" action="/logout">
+          <button class="signout" type="submit" title="Sign out">Sign out</button>
+        </form>
+      {% endif %}
     {% endif %}
   </div>
 </header>
