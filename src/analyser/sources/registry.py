@@ -14,8 +14,10 @@ looking at stale numbers.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Callable
 
 import pandas as pd
@@ -28,7 +30,35 @@ from .yahoo import YahooSource
 
 log = logging.getLogger(__name__)
 
-# Fallback universe so the tool still runs if NSE is unreachable.
+# Constituent lists captured from NSE and committed, because NSE does not answer
+# from datacenter IPs and a CI build would otherwise fall back to a token handful
+# of names. Refresh with: python -m analyser.sources.registry --refresh
+_BUNDLED_PATH = Path(__file__).resolve().parent.parent / "data" / "constituents.json"
+_bundled_cache: dict[str, list[dict]] | None = None
+
+
+def _bundled_universe(index: str) -> list[UniverseMember]:
+    """Constituents from the committed snapshot. Empty list if unavailable."""
+    global _bundled_cache
+    if _bundled_cache is None:
+        try:
+            _bundled_cache = json.loads(_BUNDLED_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            log.debug("bundled constituents unreadable: %s", exc)
+            _bundled_cache = {}
+    rows = _bundled_cache.get(index.upper(), [])
+    return [
+        UniverseMember(
+            symbol=str(r["symbol"]).upper(),
+            company=str(r.get("company") or r["symbol"]),
+            sector=str(r.get("sector") or "Unknown"),
+        )
+        for r in rows
+        if r.get("symbol")
+    ]
+
+
+# Last-resort list, used only if the bundled file is missing too.
 # Large, liquid names only. Sector labels are approximate here; the NSE CSV
 # supplies authoritative ones when reachable.
 _FALLBACK_NIFTY50: list[tuple[str, str, str]] = [
@@ -113,14 +143,28 @@ class DataRegistry:
         self._status["universe"] = self.nse.last_status
 
         if not members:
-            log.warning("NSE universe unavailable; using bundled fallback list")
-            members = [
-                UniverseMember(symbol=s, company=c, sector=sec)
-                for s, c, sec in _FALLBACK_NIFTY50
-            ]
-            self._status["universe"] = SourceStatus(
-                "Bundled fallback", True, f"{len(members)} names (NSE unreachable)"
-            )
+            # NSE refuses connections from datacenter IP ranges, so this path is
+            # the normal one in CI rather than a rare failure. The bundled
+            # snapshot keeps a GitHub Actions build covering the same universe a
+            # local run would, instead of silently narrowing to a handful of
+            # large caps.
+            members = _bundled_universe(index)
+            if members:
+                log.warning("NSE unreachable; using bundled constituent list for %s", index)
+                self._status["universe"] = SourceStatus(
+                    "Bundled list", True,
+                    f"{len(members)} names (NSE unreachable, snapshot may be stale)",
+                )
+            else:
+                log.warning("NSE unreachable and no bundled list for %s", index)
+                members = [
+                    UniverseMember(symbol=s, company=c, sector=sec)
+                    for s, c, sec in _FALLBACK_NIFTY50
+                ]
+                self._status["universe"] = SourceStatus(
+                    "Hardcoded fallback", True,
+                    f"{len(members)} large caps (NSE unreachable, no bundled list)",
+                )
         else:
             self.cache.put_meta(
                 key,
@@ -241,3 +285,52 @@ class DataRegistry:
             k: f"{'ok' if v.ok else 'FAILED'} - {v.name}: {v.detail}"
             for k, v in self._status.items()
         }
+
+
+if __name__ == "__main__":  # pragma: no cover
+    # Refresh the committed constituent snapshot. Run this from a normal
+    # internet connection, not CI, because NSE will not answer from a
+    # datacenter IP:
+    #
+    #   python -m analyser.sources.registry --refresh
+    #
+    # Index membership changes a few times a year, so this is worth re-running
+    # occasionally and committing the result.
+    import sys
+
+    if "--refresh" not in sys.argv:
+        print(__doc__)
+        raise SystemExit(0)
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s")
+    nse = NseSource()
+    snapshot: dict[str, list[dict]] = {}
+
+    for name in ("NIFTY50", "NIFTY100", "NIFTY200", "NIFTY500"):
+        found = nse.fetch_universe(name)
+        if not found:
+            log.warning("%s: unavailable, keeping any existing entry", name)
+            continue
+        snapshot[name] = [
+            {"symbol": m.symbol, "company": m.company, "sector": m.sector} for m in found
+        ]
+        log.info("%s: %d constituents", name, len(found))
+
+    if not snapshot:
+        log.error("nothing fetched; leaving the existing file untouched")
+        raise SystemExit(1)
+
+    # Merge so a single failed index does not wipe a good previous capture.
+    existing: dict[str, list[dict]] = {}
+    if _BUNDLED_PATH.exists():
+        try:
+            existing = json.loads(_BUNDLED_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            existing = {}
+    existing.update(snapshot)
+
+    _BUNDLED_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _BUNDLED_PATH.write_text(
+        json.dumps(existing, indent=1, sort_keys=True), encoding="utf-8"
+    )
+    log.info("wrote %s (%.0f KB)", _BUNDLED_PATH, _BUNDLED_PATH.stat().st_size / 1024)
