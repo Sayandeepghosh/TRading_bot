@@ -98,16 +98,37 @@ jobs:
           print(f"- Ready to buy: {ready}")
           PY
 
+      # Always available, including on a private repo with a free plan. Download
+      # it from the run summary; unzip and open index.html locally.
+      - name: Upload snapshot as downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-snapshot
+          path: docs
+          retention-days: 14
+
+      # ---- Pages steps below only run when Pages is actually available ----
+      #
+      # GitHub Pages needs either a public repo, or a private repo on a paid
+      # plan. On a private free repo the API refuses outright, so gating these
+      # keeps the scheduled run green instead of failing every night.
+      #
+      # To turn it on later:
+      #   gh variable set PUBLISH_PAGES --body true
+      # and enable Pages under Settings -> Pages -> Source: GitHub Actions.
       - name: Configure Pages
+        if: vars.PUBLISH_PAGES == 'true'
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact
+      - name: Upload Pages artifact
+        if: vars.PUBLISH_PAGES == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: docs
 
   deploy:
     needs: build
+    if: vars.PUBLISH_PAGES == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
